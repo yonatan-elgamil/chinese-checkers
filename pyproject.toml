@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "chinese-checkers"
+version = "0.2.1"
+description = "Configurable Chinese Checkers with terminal and Pygame interfaces"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10"]
+gui = ["pygame>=2.6,<3"]
+
+[tool.setuptools.packages.find]
+include = ["chinese_checkers*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

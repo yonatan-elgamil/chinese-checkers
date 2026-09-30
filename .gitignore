@@ -1,0 +1,30 @@
+# Python bytecode and test caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Virtual environments and build output
+.venv/
+venv/
+env/
+build/
+dist/
+*.egg-info/
+
+# Local editor and operating-system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Generated turn history and saved games
+*.log
+/game_data.json
+/visual_game_data.json
+
+# Personal notes and local setup instructions
+/WALKTHROUGH_HE*.md
+/START_HERE_WINDOWS.txt
