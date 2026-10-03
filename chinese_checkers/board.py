@@ -375,20 +375,14 @@ class Board:
         all_options = list(all_options)
         return all_options
 
-
-    def _can_arrive_target(self, empty_target: Tuple[int, int], loc: Tuple[int, int], save_lst: list[Any]) -> bool:
-        """Receives destination and location and tells if it is possible to reach the destination"""
-        queue = deque([loc])
-        while queue:
-            current_loc = queue.popleft()
-            if current_loc == empty_target:
-                return True
-            all_option = self.all_options_move(current_loc)
-            for next_loc in all_option:
-                if next_loc not in save_lst:
-                    queue.append(next_loc)
-                    save_lst.append(next_loc)
-        return False
+    def _can_arrive_target(
+            self,
+            empty_target: Tuple[int, int],
+            loc: Tuple[int, int],
+            save_lst: list[Any]
+    ) -> bool:
+        """Return True if a path exists from loc to empty_target."""
+        return bool(self.best_path(empty_target, loc, []))
 
     def can_arrive_target(self, lst_empty_target: list, lst_loc: list) -> List[Any]:
         """Gets a list of destinations and a list of locations
@@ -401,35 +395,70 @@ class Board:
                     break
         return new_lst_empty_target
 
-    def best_path(self, target: Tuple[int, int], loc: Tuple[int, int], path: list) -> List[Any]:
-        """Gets a destination and location and returns the best route to the destination"""
+    def best_path(
+            self,
+            target: Tuple[int, int],
+            loc: Tuple[int, int],
+            path: list
+    ) -> List[Any]:
+        """Return a shortest path from loc to target using BFS."""
+
+        cells = set(self.cell_list())
+
+        if loc not in cells or target not in cells:
+            return []
+
+        # If there is a real piece at loc, keep its color.
+        # When best_path is used only as an abstract path search,
+        # use a temporary non-empty marker.
+        piece = self.cell_contents(loc)
+        if piece == 'O':
+            piece = 'X'
+
         queue = deque([(loc, [loc])])
-        visited = set()
-        visited.add(loc)
+        visited = {loc}
+
         while queue:
             current_loc, current_path = queue.popleft()
+
             if current_loc == target:
                 return current_path
 
-            all_option = self.all_options_move(current_loc)
-            for next_loc in all_option:
+            # Simulate the moving piece at its current BFS position.
+            simulated_board = copy.deepcopy(self)
+
+            simulated_board.br[loc[0]][loc[1]] = 'O'
+            simulated_board.br[current_loc[0]][current_loc[1]] = piece
+
+            for next_loc in simulated_board.all_options_move(current_loc):
                 if next_loc not in visited:
                     visited.add(next_loc)
                     queue.append(
-                        (next_loc, current_path + [next_loc]))
+                        (next_loc, current_path + [next_loc])
+                    )
+
         return []
 
-    def all_best_paths(self, lst_empty_target: List[Tuple[int, int]], lst_loc: List[Tuple[int, int]]) -> List[Any]:
-        """Gets a list of destinations and a list of locations and returns the best path to the destination"""
-        path = []
-        for empty_target in lst_empty_target:
+    def all_best_paths(
+            self,
+            lst_empty_target: List[Tuple[int, int]],
+            lst_loc: List[Tuple[int, int]]
+    ) -> List[Any]:
+        """Return all shortest paths between the given locations and targets."""
+
+        paths = []
+
+        for target in lst_empty_target:
             for loc in lst_loc:
-                if not self._can_arrive_target(empty_target, loc, []):
-                    continue
-                if self.best_path(empty_target, loc, []):
-                    path.append(self.best_path(empty_target, loc, []))
-        bast_sort_path = util.find_smallest_lists(path)
-        return bast_sort_path
+                current_path = self.best_path(target, loc, [])
+
+                if current_path:
+                    paths.append(current_path)
+
+        if not paths:
+            return []
+
+        return util.find_smallest_lists(paths)
 
     def replace(self, loc: Tuple[int, int], target: Tuple[int, int]) -> bool:
         """The program receives a location and destination and replaces them
