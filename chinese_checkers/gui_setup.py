@@ -1,21 +1,27 @@
 """Match settings and the Pygame menu; the board builder lives in setup.py."""
 
-from dataclasses import dataclass, field
 import textwrap
 
 from .setup import PLAYER_COUNTS, SetupOptions, build_game
 
 
-@dataclass
 class SetupSelection:
     """Editable settings, kept valid as the number of players changes."""
 
-    size: int = 4
-    player_count: int = 2
-    computer_count: int = 0
-    sets_per_player: int = 1
-    teams: int = 0
-    names: list[str] = field(default_factory=lambda: [f"Player {i}" for i in range(1, 7)])
+    def __init__(self, size=4, player_count=2, computer_count=0,
+                 sets_per_player=1, teams=0, names=None):
+        self.size = size
+        self.player_count = player_count
+        self.computer_count = computer_count
+        self.sets_per_player = sets_per_player
+        self.teams = teams
+        self.names = ([f"Player {i}" for i in range(1, 7)]
+                      if names is None else names)
+
+    def __eq__(self, other):
+        if type(self) is not type(other):
+            return NotImplemented
+        return self.__dict__ == other.__dict__
 
     @classmethod
     def from_game(cls, game):
@@ -23,7 +29,7 @@ class SetupSelection:
         human_names = [player.get_name() for player in players
                        if player.get_name() != "computer"]
         selection = cls(game.board.size, len(players), len(players) - len(human_names),
-                        len(players[0].get_color()), game.is_group)
+                        len(players[0].get_colors()), game.is_group)
         selection.names[:len(human_names)] = human_names
         return selection
 

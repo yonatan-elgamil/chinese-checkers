@@ -1,6 +1,5 @@
 """Turn-by-turn match controller shared by terminal and graphical interfaces."""
 
-from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 from .game import Game, MatchProgress
@@ -10,14 +9,39 @@ Coordinate = Tuple[int, int]
 Move = Tuple[Coordinate, Coordinate]
 
 
-@dataclass(frozen=True)
 class SessionEvent:
     """A change an interface can display without changing the game rules."""
 
-    kind: str
-    message: str
-    player: Optional[Player] = None
-    move: Optional[Move] = None
+    def __init__(self, kind, message, player=None, move=None):
+        self._kind = kind
+        self._message = message
+        self._player = player
+        self._move = move
+
+    @property
+    def kind(self):
+        return self._kind
+
+    @property
+    def message(self):
+        return self._message
+
+    @property
+    def player(self):
+        return self._player
+
+    @property
+    def move(self):
+        return self._move
+
+    def __eq__(self, other):
+        if type(self) is not type(other):
+            return NotImplemented
+        return ((self.kind, self.message, self.player, self.move)
+                == (other.kind, other.message, other.player, other.move))
+
+    def __hash__(self):
+        return hash((self.kind, self.message, self.player, self.move))
 
 
 class GameSession:
@@ -49,7 +73,7 @@ class GameSession:
         """Finish a turn already applied by the terminal compatibility API."""
         player = self._require_player()
         self.game._record_board_change()
-        if self.game.is_win(player):
+        if self.game.has_player_won(player):
             self.game._record_winner(self.progress, player)
         self.progress.pending_players.pop(0)
         self.current_player = None
@@ -68,7 +92,7 @@ class GameSession:
     def _advance(self) -> None:
         """Prepare a turn, automatically passing players with no legal moves."""
         while self.status == "playing":
-            if self.game.is_over():
+            if self.game.is_finished():
                 self._finish("finished", self.game.finish_match(self.progress))
                 return
             if not self.progress.round_active:

@@ -2,7 +2,6 @@
 
 from typing import Any, Dict, List, Tuple
 import copy
-from dataclasses import dataclass, field
 
 from .player import Player
 from .ball import Ball
@@ -13,19 +12,26 @@ from .ai import ComputerStrategy
 from .storage import GameStorage
 
 
-@dataclass
 class MatchProgress:
-    """Transient match state, including rankings and remaining turns."""
+    """Transient match state; each instance owns its default lists."""
 
-    active_players: List[Player]
-    rankings: List[Any] = field(default_factory=list)
-    ranking_colors: List[Any] = field(default_factory=list)
-    winner_names: List[str] = field(default_factory=list)
-    winner_colors: List[List[str]] = field(default_factory=list)
-    pending_players: List[Player] = field(default_factory=list)
-    unchanged_rounds: int = 0
-    pass_rounds: int = 0
-    round_active: bool = False
+    def __init__(self, active_players, rankings=None, ranking_colors=None,
+                 winner_names=None, winner_colors=None, pending_players=None,
+                 unchanged_rounds=0, pass_rounds=0, round_active=False):
+        self.active_players = active_players
+        self.rankings = [] if rankings is None else rankings
+        self.ranking_colors = [] if ranking_colors is None else ranking_colors
+        self.winner_names = [] if winner_names is None else winner_names
+        self.winner_colors = [] if winner_colors is None else winner_colors
+        self.pending_players = [] if pending_players is None else pending_players
+        self.unchanged_rounds = unchanged_rounds
+        self.pass_rounds = pass_rounds
+        self.round_active = round_active
+
+    def __eq__(self, other):
+        if type(self) is not type(other):
+            return NotImplemented
+        return self.__dict__ == other.__dict__
 
 
 class Game:
@@ -36,69 +42,70 @@ class Game:
 
     def __init__(self, board: Board, balls: Dict[str, List[Ball]], players: List[Player],
                  is_group: int, color_directions=None, store=None):
-        """ Generates a game object according to the input of a player ball board and if there are teams in the game"""
+        """Create a match and share its Ball objects with the board."""
         self.is_group = is_group
         self.board = board
         self.balls = balls
+        self.board.load_color_grid(self.board.get_color_grid(), balls)
         self.players = players
         self.store = store if store is not None else GameStorage(self.filename)
         self.passed_turns = 0
         self.unchanged_turns = 0
-        self.previous_board = copy.deepcopy(self.board.get_br())
-        self.dic_color_loc = self._starting_directions(color_directions)
-        self.computer = ComputerStrategy(self)
+        self.previous_board = copy.deepcopy(self.board.get_color_grid())
+        self.starting_directions = self._resolve_starting_directions(color_directions)
+        self.computer_strategy = ComputerStrategy(self)
 
-    def _starting_directions(self, saved_directions):
+    def _resolve_starting_directions(self, saved_directions):
         if saved_directions is not None:
             return dict(saved_directions)
         directions = {}
-        triangles = self.board.target_triangles(len(self.players[0].get_color()))
+        triangles = self.board.triangle_cells(len(self.players[0].get_colors()))
         for direction in ('N', 'NE', 'SE', 'S', 'SW', 'NW'):
-            color = self.board.cell_contents(triangles[direction][0])
+            color = self.board.color_at(triangles[direction][0])
             if color != 'O':
                 directions[color] = direction
         return directions
 
-    def serialize(self, lst_wins: Any, lst_wins_color: Any, lst_name_wins: Any, save_players: Any,
-                  playr: Any, started: Any,end: Any, dic_color_loc: Any, lst_color_wn: Any) -> Any:
+    def create_save_state(self, rankings, ranking_colors, winner_names, active_players,
+                          next_player_name, started, end, starting_directions, winner_colors):
+        """Export the original JSON field names for save-file compatibility."""
         return {
             'is_group': self.is_group,
             'board': self.board,
             'balls': self.balls,
             'players': self.players,
-            'lst_wins': lst_wins,
-            'lst_wins_color': lst_wins_color,
-            'lst_name_wins': lst_name_wins,
-            'save_players': save_players,
-            'playr': playr,
+            'lst_wins': rankings,
+            'lst_wins_color': ranking_colors,
+            'lst_name_wins': winner_names,
+            'save_players': active_players,
+            'playr': next_player_name,
             'started': started,
             'end': end,
-            'dic_color_loc': dic_color_loc,
-            'lst_color_wn': lst_color_wn
+            'dic_color_loc': starting_directions,
+            'lst_color_wn': winner_colors
         }
 
-    def word_color(self, playr: Player) -> str:
-        """Gets a player and holds a string of his colors"""
+    def describe_player_colors(self, playr: Player) -> str:
+        """Describe the owned colors in their existing display order."""
         colorr = ''
-        for i in range(len(playr.get_color()) - 1):
-            colorr = colorr + playr.get_color()[i] + ' and '
-        colorr = colorr + playr.get_color()[len(playr.get_color()) - 1]
+        for i in range(len(playr.get_colors()) - 1):
+            colorr = colorr + playr.get_colors()[i] + ' and '
+        colorr = colorr + playr.get_colors()[len(playr.get_colors()) - 1]
         return colorr
 
-    def loc_color(self, color: str) -> List[Tuple[int, int]]:
-        """Gets a color and returns its positions"""
+    def positions_for_color(self, color: str) -> List[Tuple[int, int]]:
+        """Return the positions of the shared balls for one color."""
         loc_lst = []
         for bal in self.balls[color]:
-            loc_lst.append(bal.get_location())
+            loc_lst.append(bal.get_position())
         return loc_lst
 
-    def loc_player(self, playr: Player) -> List[Tuple[int, int]]:
-        """Gets a player and returns the positions of his balls"""
+    def positions_for_player(self, playr: Player) -> List[Tuple[int, int]]:
+        """Return the positions of all balls owned by the player."""
         loc_lst = []
-        for colorr in playr.get_color():
-            loc_lst += self.loc_color(colorr)
+        for colorr in playr.get_colors():
+            loc_lst += self.positions_for_color(colorr)
         return loc_lst
-
 
     def log_turn(self, player, move):
         logs.log_turn(player, move)
@@ -109,15 +116,15 @@ class Game:
     def print_history(self, moves):
         logs.print_history(moves)
 
-    def dic_targ(self) -> Dict[str, str]:
-        """The function returns a dictionary for each color and its target direction"""
+    def goal_directions(self) -> Dict[str, str]:
+        """Map each color to the corner opposite its starting corner."""
         dic_target = {}
         lst_color = []
         for playr in self.players:
-            for colorr in playr.get_color():
+            for colorr in playr.get_colors():
                 lst_color.append(colorr)
         for colorr in lst_color:
-            directionn = self.dic_color_loc[colorr]
+            directionn = self.starting_directions[colorr]
             if directionn == 'N':
                 dic_target[colorr] = 'S'
             if directionn == 'S':
@@ -132,30 +139,8 @@ class Game:
                 dic_target[colorr] = 'NW'
         return dic_target
 
-    # Keep the original public calls while the move selection lives in ai.py.
-    def _victory_places_strategy(self, *args, **kwargs):
-        return self.computer._victory_places_strategy(*args, **kwargs)
-
-    def victory_places_strategy(self, *args, **kwargs):
-        return self.computer.victory_places_strategy(*args, **kwargs)
-
-    def go_victory_places_strategy(self, *args, **kwargs):
-        return self.computer.go_victory_places_strategy(*args, **kwargs)
-
-    def relevant_goal_edge_cells(self, *args, **kwargs):
-        return self.computer.relevant_goal_edge_cells(*args, **kwargs)
-
-    def go_target(self, *args, **kwargs):
-        return self.computer.go_target(*args, **kwargs)
-
-    def go_location(self, *args, **kwargs):
-        return self.computer.go_location(*args, **kwargs)
-
-    def computer_stuck(self, *args, **kwargs):
-        return self.computer.computer_stuck(*args, **kwargs)
-
-    def single_turn(self, player: Player):
-        """Compatibility entry point for a turn played in the terminal."""
+    def play_terminal_turn(self, player: Player):
+        """Play one turn through the terminal input and output adapter."""
         from .terminal import play_single_turn
 
         return play_single_turn(self, player)
@@ -165,58 +150,58 @@ class Game:
         if move is None:
             if player.get_name() != "computer":
                 self.passed_turns += 1
-            self.log_turn(player.get_name() + " in color " + self.word_color(player),
+            self.log_turn(player.get_name() + " in color " + self.describe_player_colors(player),
                           "Choose to pass his turn and do nothing")
             return "Passed this turn"
         source, target = move
         self.apply_move(player, source, target)
         description = (f"Moved ball from row {source[0] + 1} and column {source[1] + 1} "
                        f"to row {target[0] + 1} and column {target[1] + 1}")
-        self.log_turn(player.get_name() + " in color " + self.word_color(player),
+        self.log_turn(player.get_name() + " in color " + self.describe_player_colors(player),
                       description)
         return description
 
     def apply_move(self, playr: Player, source: Tuple[int, int], target: Tuple[int, int]):
-        """Validate and apply a turn to both the board and the matching ball."""
-        if source not in self.board.cell_list() or target not in self.board.cell_list():
+        """Validate a move; the board then relocates the shared Ball once."""
+        if source not in self.board.cell_coordinates() or target not in self.board.cell_coordinates():
             raise ValueError("Move coordinates must be on the board")
-        color = self.board.cell_contents(source)
+        color = self.board.color_at(source)
         piece = next(
-            (ball for ball in self.balls.get(color, []) if ball.get_location() == source),
+            (ball for ball in self.balls.get(color, []) if ball.get_position() == source),
             None,
         )
-        if color not in playr.get_color() or piece is None:
+        if (color not in playr.get_colors() or piece is None
+                or self.board.get_ball(source) is not piece):
             raise ValueError("The source must contain one of this player's balls")
-        if target not in self.board.all_options_move(source):
+        if target not in self.board.legal_destinations(source):
             raise ValueError("The target is not a legal move")
-        if not self.board.replace(source, target):
+        if not self.board.move_ball(source, target):
             raise ValueError("The target is occupied")
-        piece.replaces(target)
 
-    def _is_win(self, playr: Player) -> bool:
-        """Checks specifically for one player if he won"""
-        if len(self.players) == 2 and len(playr.get_color()) == 1:
+    def _has_completed_goals(self, playr: Player) -> bool:
+        """Check whether all target cells contain this player's colors."""
+        if len(self.players) == 2 and len(playr.get_colors()) == 1:
             typp = 2
         else:
             typp = 1
-        for colorr in playr.get_color():
-            targett = self.dic_targ()[colorr]
-            dic_loc = self.board.target_triangles(typp)
+        for colorr in playr.get_colors():
+            targett = self.goal_directions()[colorr]
+            dic_loc = self.board.triangle_cells(typp)
             lst_loc = dic_loc[targett]
             for loc in lst_loc:
-                if self.board.cell_contents(loc) != colorr:
+                if self.board.color_at(loc) != colorr:
                     return False
         return True
 
-    def group(self) -> List[Any]:
-        """Returns a list of lists with the colors of each group in a separate list"""
+    def team_color_pairs(self) -> List[Any]:
+        """Return each team as a pair of colors in opposite starting corners."""
         lst_groups = []
         if self.is_group == 1:
             lst_color = []
             for playr in self.players:
-                for colorr in playr.get_color():
+                for colorr in playr.get_colors():
                     lst_color.append(colorr)
-            dic = copy.deepcopy(self.dic_color_loc)
+            dic = copy.deepcopy(self.starting_directions)
             if len(lst_color) == 4:
                 mone = 2
             else:
@@ -235,17 +220,16 @@ class Game:
                 lst_color.remove(opp_color)
         return lst_groups
 
-    def is_win(self, playr: Player) -> bool:
-        """Returns if the player won (also checks if he is in the group)
-         if in the group everyone has to reach the goal for him to be considered a winner"""
+    def has_player_won(self, playr: Player) -> bool:
+        """Check goal completion for one player, including their teammate."""
         if self.is_group == 0:
-            return self._is_win(playr)
+            return self._has_completed_goals(playr)
         else:
-            opp_playr = self.opp_playr(playr)
-            return self._is_win(playr) and self._is_win(opp_playr)
+            teammate_for = self.teammate_for(playr)
+            return self._has_completed_goals(playr) and self._has_completed_goals(teammate_for)
 
-    def is_over(self) -> bool:
-        """Returns true or false if the game is over"""
+    def is_finished(self) -> bool:
+        """Check whether enough players or teams have completed their goals."""
         num_player = len(self.players)
         if self.is_group == 1:
             num_and = num_player - 2
@@ -253,18 +237,18 @@ class Game:
             num_and = num_player - 1
         mone = 0
         for playr in self.players:
-            if self.is_win(playr):
+            if self.has_player_won(playr):
                 mone += 1
         if mone >= num_and:
             return True
         return False
 
-    def opp_playr(self, playr: Player) -> Any:
-        """Returns the player opposite the given player The function is readable only if 'is_groups' = 1"""
+    def teammate_for(self, playr: Player) -> Any:
+        """Return the player in the opposite corner when teams are enabled."""
         if self.is_group == 0:
             return 0
-        lst_group = self.group()
-        colorr = playr.get_color()[0]
+        lst_group = self.team_color_pairs()
+        colorr = playr.get_colors()[0]
         for lst in lst_group:
             if colorr in lst:
                 opp_color = lst
@@ -272,12 +256,12 @@ class Game:
                 opp_color = opp_color[0]
                 break
         for playrr in self.players:
-            if playrr.get_color()[0] == opp_color:
-                opp_playr = playrr
-                return opp_playr
+            if playrr.get_colors()[0] == opp_color:
+                teammate_for = playrr
+                return teammate_for
 
-    def ln_real_players(self) -> int:
-        """Returns the number of real players in the game"""
+    def human_player_count(self) -> int:
+        """Count players whose name does not mark them as a computer."""
         mon = 0
         for playr in self.players:
             if playr.get_name() != 'computer':
@@ -299,25 +283,25 @@ class Game:
         if saved_active:
             active_colors = [entry['color'] for entry in saved_active]
             progress.active_players = [player for player in self.players
-                                       if player.get_color() in active_colors]
+                                       if player.get_colors() in active_colors]
 
         if 'pending_colors' in saved:
             progress.pending_players = [
                 next(player for player in progress.active_players
-                     if player.get_color() == colors)
+                     if player.get_colors() == colors)
                 for colors in saved['pending_colors']
             ]
             progress.round_active = True
         else:
             # Older saves did not record the position inside a round.
             progress.active_players = [player for player in progress.active_players
-                                       if player.get_color() not in progress.winner_colors]
+                                       if player.get_colors() not in progress.winner_colors]
 
         progress.unchanged_rounds = saved.get('unchanged_rounds', 0)
         progress.pass_rounds = saved.get('pass_rounds', 0)
         self.passed_turns = saved.get('passed_turns', 0)
         self.unchanged_turns = saved.get('unchanged_turns', 0)
-        self.previous_board = copy.deepcopy(saved.get('previous_board', self.board.get_br()))
+        self.previous_board = copy.deepcopy(saved.get('previous_board', self.board.get_color_grid()))
         return progress
 
     def _begin_round(self, progress: MatchProgress):
@@ -326,7 +310,7 @@ class Game:
             return
         progress.unchanged_rounds = (progress.unchanged_rounds + 1
                                      if self.unchanged_turns == len(self.players) else 0)
-        real_players = self.ln_real_players()
+        real_players = self.human_player_count()
         progress.pass_rounds = (progress.pass_rounds + 1
                                 if real_players and self.passed_turns == real_players else 0)
         self.unchanged_turns = 0
@@ -336,13 +320,13 @@ class Game:
 
     def _save_before_turn(self, progress: MatchProgress, player: Player):
         """Keep the original save fields and record the current round position."""
-        checkpoint = self.serialize(
+        checkpoint = self.create_save_state(
             progress.rankings, progress.ranking_colors, progress.winner_names,
             progress.active_players, player.get_name(), 1, 0,
-            self.dic_color_loc, progress.winner_colors,
+            self.starting_directions, progress.winner_colors,
         )
         checkpoint.update({
-            'pending_colors': [candidate.get_color()
+            'pending_colors': [candidate.get_colors()
                                for candidate in progress.pending_players],
             'unchanged_rounds': progress.unchanged_rounds,
             'pass_rounds': progress.pass_rounds,
@@ -354,20 +338,20 @@ class Game:
 
     def _has_no_moves(self, player: Player) -> bool:
         """A player with no ball able to move loses this turn."""
-        return all(not self.board.all_options_move(location)
-                   for location in self.loc_player(player))
+        return all(not self.board.legal_destinations(location)
+                   for location in self.positions_for_player(player))
 
     def record_blocked_turn(self, player: Player) -> str:
         """Record a turn skipped because the player has no legal moves."""
         message = 'Nowhere to move with any balls so the turn goes to the next player'
-        self.log_turn(player.get_name() + ' in color ' + self.word_color(player), message)
+        self.log_turn(player.get_name() + ' in color ' + self.describe_player_colors(player), message)
         self.passed_turns += 1
         return message
 
     def _record_board_change(self):
-        if self.board.get_br() == self.previous_board:
+        if self.board.get_color_grid() == self.previous_board:
             self.unchanged_turns += 1
-        self.previous_board = copy.deepcopy(self.board.get_br())
+        self.previous_board = copy.deepcopy(self.board.get_color_grid())
 
     def _draw_reached(self, progress: MatchProgress) -> bool:
         """Stop after three consecutive rounds without progress or human turns."""
@@ -375,31 +359,31 @@ class Game:
 
     def _record_winner(self, progress: MatchProgress, player: Player):
         """Record one player or one team once, preserving the ranking format."""
-        if player.get_color() in progress.winner_colors:
+        if player.get_colors() in progress.winner_colors:
             return
-        player.set_number_wins(player.get_number_wins() + 1)
+        player.set_wins(player.get_wins() + 1)
         progress.winner_names.append(player.get_name())
-        progress.winner_colors.append(player.get_color())
+        progress.winner_colors.append(player.get_colors())
         if self.is_group:
-            partner = self.opp_playr(player)
-            partner.set_number_wins(partner.get_number_wins() + 1)
+            partner = self.teammate_for(player)
+            partner.set_wins(partner.get_wins() + 1)
             progress.winner_names.append(partner.get_name())
-            progress.winner_colors.append(partner.get_color())
+            progress.winner_colors.append(partner.get_colors())
             progress.rankings.append([player.get_name(), partner.get_name()])
-            progress.ranking_colors.append([player.get_color()[0], partner.get_color()[0]])
-            description = (f'{player.get_name()} in color: {player.get_color()[0]} and '
-                           f'{partner.get_name()} in color: {partner.get_color()[0]}')
+            progress.ranking_colors.append([player.get_colors()[0], partner.get_colors()[0]])
+            description = (f'{player.get_name()} in color: {player.get_colors()[0]} and '
+                           f'{partner.get_name()} in color: {partner.get_colors()[0]}')
             self.log_turn(description, ' finished the game')
         else:
             progress.rankings.append(player.get_name())
-            color = self.word_color(player)
+            color = self.describe_player_colors(player)
             progress.ranking_colors.append(color)
             self.log_turn(player.get_name() + ' in color ' + color, ' finished the game')
 
     def _remove_round_winners(self, progress: MatchProgress):
         """Advance the remaining players to the next round."""
         progress.active_players = [player for player in progress.active_players
-                                   if player.get_color() not in progress.winner_colors]
+                                   if player.get_colors() not in progress.winner_colors]
         progress.winner_names.clear()
         progress.winner_colors.clear()
         progress.pending_players.clear()
@@ -419,9 +403,9 @@ class Game:
         if self.is_group:
             last_team = progress.active_players
             progress.rankings.append([player.get_name() for player in last_team])
-            progress.ranking_colors.append([player.get_color()[0] for player in last_team])
+            progress.ranking_colors.append([player.get_colors()[0] for player in last_team])
             for player in last_team:
-                player.set_number_losses(player.get_number_losses() + 1)
+                player.set_losses(player.get_losses() + 1)
             message = ' '.join(
                 f'{names[0]} in color: {colors[0]} and '
                 f'{names[1]} in color: {colors[1]} finished place: {place} .'
@@ -430,9 +414,9 @@ class Game:
             )
         else:
             loser = progress.active_players[0]
-            loser.set_number_losses(loser.get_number_losses() + 1)
+            loser.set_losses(loser.get_losses() + 1)
             progress.rankings.append(loser.get_name())
-            progress.ranking_colors.append(self.word_color(loser))
+            progress.ranking_colors.append(self.describe_player_colors(loser))
             message = ' '.join(
                 f'{name} in color: {color} finished place: {place} .'
                 for place, (name, color) in enumerate(

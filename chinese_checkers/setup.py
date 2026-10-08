@@ -1,7 +1,5 @@
 """Build a ready match from options, or restore one from saved JSON."""
 
-from dataclasses import dataclass
-
 from . import utils
 from .ball import Ball
 from .board import Board
@@ -23,15 +21,55 @@ STARTING_CORNERS = {
 }
 
 
-@dataclass(frozen=True)
 class SetupOptions:
-    size: int
-    player_count: int
-    computer_count: int
-    sets_per_player: int
-    teams: int
+    """Validated, read-only match options implemented as an ordinary class."""
 
-    def __post_init__(self):
+    def __init__(self, size, player_count, computer_count, sets_per_player, teams):
+        self._size = size
+        self._player_count = player_count
+        self._computer_count = computer_count
+        self._sets_per_player = sets_per_player
+        self._teams = teams
+        self._validate()
+
+    @property
+    def size(self):
+        return self._size
+
+    @property
+    def player_count(self):
+        return self._player_count
+
+    @property
+    def computer_count(self):
+        return self._computer_count
+
+    @property
+    def sets_per_player(self):
+        return self._sets_per_player
+
+    @property
+    def teams(self):
+        return self._teams
+
+    def _values(self):
+        return (self.size, self.player_count, self.computer_count,
+                self.sets_per_player, self.teams)
+
+    def __eq__(self, other):
+        if type(self) is not type(other):
+            return NotImplemented
+        return self._values() == other._values()
+
+    def __hash__(self):
+        return hash(self._values())
+
+    def __repr__(self):
+        return (f"SetupOptions(size={self.size}, player_count={self.player_count}, "
+                f"computer_count={self.computer_count}, sets_per_player={self.sets_per_player}, "
+                f"teams={self.teams})")
+
+    def _validate(self):
         valid_size = (isinstance(self.size, int) and not isinstance(self.size, bool)
                       and self.size >= 4 and (self.size - 1) % 3 == 0)
         if not valid_size:
@@ -108,7 +146,7 @@ def build_game(options: SetupOptions, human_names, store=None) -> Game:
         raise ValueError("Supply a unique, nonempty name for each human player")
 
     board = Board(options.size)
-    triangles = board.target_triangles(options.triangle_type)
+    triangles = board.triangle_cells(options.triangle_type)
     balls = {}
     players = []
     directions = {}
@@ -123,7 +161,7 @@ def build_game(options: SetupOptions, human_names, store=None) -> Game:
             if len(pieces) != options.balls_per_color:
                 raise ValueError("Starting triangle has an unexpected size")
             for piece in pieces:
-                if not board.add_balls_triple_size(piece, direction, options.triangle_type):
+                if not board.add_ball_to_triangle(piece, direction, options.triangle_type):
                     raise ValueError("Starting triangles overlap")
             balls[color] = pieces
             directions[color] = direction
@@ -149,11 +187,11 @@ def restore_game(data, store=None):
     """Recreate domain objects and the next player from an existing save."""
     saved_board = data["board"]
     board = Board(int(saved_board["size"]))
-    board.set_br(saved_board["br"])
     balls = {
         color: [Ball(color, tuple(item["location"])) for item in pieces]
         for color, pieces in data["balls"].items()
     }
+    board.load_color_grid(saved_board["br"], balls)
     saved_players = data["players"]
     if data.get("pending_colors"):
         next_colors = data["pending_colors"][0]

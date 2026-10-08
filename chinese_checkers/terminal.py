@@ -23,19 +23,19 @@ def prompt_human_move(game, player):
         if is_valid_coordinate_input(first):
             row, column = map(int, first.split(","))
             source = (row - 1, column - 1)
-            if source in game.loc_player(player) and game.board.all_options_move(source):
+            if source in game.positions_for_player(player) and game.board.legal_destinations(source):
                 break
         first = input("Choose one of your balls with at least one legal move: ")
     while True:
         target = _coordinate("Choose a legal target (row,column): ")
-        if target in game.board.all_options_move(source):
+        if target in game.board.legal_destinations(source):
             return source, target
         print("That target is not a legal move.")
 
 
 def play_single_turn(game, player):
     """Ask a human or the computer for a move and display a successful move."""
-    move = (game.computer.choose_move(player) if player.get_name() == "computer"
+    move = (game.computer_strategy.choose_move(player) if player.get_name() == "computer"
             else prompt_human_move(game, player))
     game.take_turn(player, move)
     if move is not None:
@@ -65,5 +65,5 @@ def play_game(game):
                 _offer_history(game)
         if session.status != "playing":
             return
-        game.single_turn(session.current_player)
+        game.play_terminal_turn(session.current_player)
         session.complete_turn()

@@ -2,18 +2,19 @@
 
 from typing import List
 
+
 class Player:
     """A human player or the computer, identified by the name 'computer'."""
 
     def __init__(self, name: str, number_wins: int, number_losses: int, color: List[str]):
-        """Constructs a player with name attributes amount of wins and losses and game color"""
+        """Store a player name, owned colors and match statistics."""
         self.name = name
         self.number_wins = number_wins
         self.number_losses = number_losses
         self.color = color
 
     def __str__(self) -> str:
-        """Prints a player with name attributes amount of wins and losses and game color"""
+        """Describe the player, owned colors and win/loss statistics."""
         color_word = self.color[0]
         for i in range(1,len(self.color)):
             color_word = color_word+' ,'+self.color[i]
@@ -24,29 +25,23 @@ class Player:
         """Returns the player name"""
         return self.name
 
-    def get_number_wins(self) -> int:
+    def get_wins(self) -> int:
         """Returns the player's number of wins"""
         return self.number_wins
 
-    def get_number_losses(self) -> int:
+    def get_losses(self) -> int:
         """Returns the player's number of losses"""
         return self.number_losses
 
-    def get_color(self) -> List[str]:
-        """Returns the color number of the player"""
+    def get_colors(self) -> List[str]:
+        """Return all colors owned by this player."""
         return self.color
 
-    def set_number_wins(self, number_wins: int):
-        """Gets a number of wins and replaces them with the current number"""
+    def set_wins(self, number_wins: int):
+        """Update the recorded number of wins."""
         self.number_wins = number_wins
 
-    def set_number_losses(self, number_losses: int):
-        """Gets a number of losses and replaces them with the current number"""
+    def set_losses(self, number_losses: int):
+        """Update the recorded number of losses."""
         self.number_losses = number_losses
-
-
-
-
-
-
 

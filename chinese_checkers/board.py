@@ -1,11 +1,15 @@
-from .ball import Ball
-from typing import List, Tuple, Iterable, Optional, Callable, Literal, Set, Dict, Any
-import copy
-from . import utils as util
+"""Star-shaped board containing Ball objects, geometry and legal moves."""
+
 from collections import deque
+from typing import Any, Dict, List, Optional, Tuple
+
+from .ball import Ball
+
+Coordinate = Tuple[int, int]
+
 
 class Board:
-    """Star-shaped board geometry, movement rules, and path searches."""
+    """Own the actual pieces; an empty cell contains None."""
 
     def __init__(self, size: int):
         """Build an empty board of size 4, 7, 10, or another valid 3n + 1 size."""
@@ -21,33 +25,32 @@ class Board:
             total_list.append([])
         for i in range(small_triple_size):
             for j in range(small_triple_size-1-i,small_triple_size):
-                total_list[i].append('O')
+                total_list[i].append(None)
         mone_row = small_triple_size
         reduces_col = -1
         for i in range(mone_row,mone_row + small_triple_size+1):
             reduces_col += 1
             for j in range(col_size-reduces_col):
-                total_list[i].append('O')
+                total_list[i].append(None)
         mone_row += small_triple_size+1
         increases_col = -1
         for i in range(mone_row,mone_row + small_triple_size):
             increases_col += 1
             for j in range(col_size-small_triple_size+1+increases_col):
-                total_list[i].append('O')
+                total_list[i].append(None)
         mone_row += small_triple_size
         reduces_col = -1
         for i in range(mone_row,mone_row + small_triple_size):
             reduces_col += 1
             for j in range(small_triple_size - reduces_col):
-                total_list[i].append('O')
-        self.br = total_list
+                total_list[i].append(None)
+        self._cells = total_list
 
     def __str__(self) -> str:
-        """The program will cause that in every printing of the
-        board of board will be printed in the shape of a Star of David"""
+        """Render the same star-shaped color display used by the terminal."""
         result = ""
         size = self.size
-        br = self.br
+        br = self.get_color_grid()
 
         small_triple_size = int((size - 1) / 3)
         result += '\n'.join(' ' * (size - 1 - i) + ' '.join(row) for i, row in enumerate(br[:small_triple_size]))
@@ -77,43 +80,86 @@ class Board:
         return result
 
     def get_size(self) -> int:
-        """Gets board size return it"""
+        """Return the board size used to construct its geometry."""
         return self.size
 
-    def get_br(self) -> List[List[str]]:
-        """Returns the board in the form of a list of lists"""
-        return self.br
+    def get_cells(self) -> List[List[Optional[Ball]]]:
+        """Return copied rows containing the board's actual Ball references."""
+        return [row[:] for row in self._cells]
 
-    def set_br(self, br: List[List[str]]):
-        """Gets a list of a list in the form of a table and updates it"""
-        self.br = br
+    def get_color_grid(self) -> List[List[str]]:
+        """Return a detached color snapshot for display and legacy JSON saves."""
+        return [[ball.color if ball is not None else 'O' for ball in row]
+                for row in self._cells]
 
-    def cell_list(self) -> List[Tuple[int, int]]:
-        """"The program returns all the coordinates of the given board"""
+    def load_color_grid(self, colors: List[List[str]], balls=None) -> None:
+        """Import a color grid, reusing supplied Ball objects when they match.
+
+        Color strings exist only at the persistence and test-fixture boundary.
+        Every occupied cell in the resulting board contains an actual Ball.
+        """
+        existing = {(ball.color, ball.location): ball
+                    for pieces in (balls or {}).values() for ball in pieces}
+        self._cells = []
+        for row_index, row in enumerate(colors):
+            cells = []
+            for column, color in enumerate(row):
+                location = (row_index, column)
+                ball = None
+                if color != 'O':
+                    ball = existing.get((color, location))
+                    if ball is None:
+                        ball = Ball(color, location)
+                cells.append(ball)
+            self._cells.append(cells)
+
+    def get_ball(self, coordinate: Coordinate) -> Optional[Ball]:
+        """Return the exact piece at a coordinate, or None for an empty cell."""
+        row, column = coordinate
+        return self._cells[row][column]
+
+    def color_at(self, coordinate: Coordinate) -> str:
+        """Return a piece's color, or 'O' for display of an empty cell."""
+        ball = self.get_ball(coordinate)
+        return ball.color if ball is not None else 'O'
+
+    def place_ball(self, ball: Ball) -> bool:
+        """Place an existing Ball in an empty board cell."""
+        if ball.location not in self.cell_coordinates() or not self.is_empty(ball.location):
+            return False
+        row, column = ball.location
+        self._cells[row][column] = ball
+        return True
+
+    def remove_ball(self, coordinate: Coordinate) -> Optional[Ball]:
+        """Remove and return a piece; used on isolated computer simulations."""
+        row, column = coordinate
+        ball = self._cells[row][column]
+        self._cells[row][column] = None
+        return ball
+
+    def is_empty(self, coordinate: Coordinate) -> bool:
+        return self.get_ball(coordinate) is None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Keep the original saved board shape and its color-based format."""
+        return {'size': self.size, 'br': self.get_color_grid()}
+
+    def cell_coordinates(self) -> List[Tuple[int, int]]:
+        """Return every valid board coordinate in row order."""
         cor_list = []
-        for i in range(len(self.br)):
-            for j in range(len(self.br[i])):
+        for i in range(len(self._cells)):
+            for j in range(len(self._cells[i])):
                 cor_list.append((i, j))
         return cor_list
 
-    def is_empty(self, coordinate: Tuple[int, int]) -> bool:
-        """The program get a coordinate in the board and returns if it is empty"""
-        row = coordinate[0]
-        col = coordinate[1]
-        if self.br[row][col] != 'O':
-            return False
-        return True
-
-    def target_triangles(self, typ: int) -> Dict[str, List[Tuple[int, int]]]:
-        """"The program returns a dictionary with keys according to the
-          direction that returns a list of coordinates of the smalltriangle
-          in the Star of David of the same size
-          It's legal scrappers: 'N', 'NE', 'SE', 'S', 'SW', 'NW'"""
+    def triangle_cells(self, typ: int) -> Dict[str, List[Tuple[int, int]]]:
+        """Return the six corner triangles for the requested set size."""
         dic = {}
         lst_n = []
         small_triple_size = int((self.size - 1) / 3)
         for i in range(small_triple_size):
-            for j in range(len(self.br[i])):
+            for j in range(len(self._cells[i])):
                 lst_n.append((i, j))
         if typ == 2:
             for i in range(small_triple_size+1):
@@ -133,7 +179,7 @@ class Board:
         reduces_col = -1
         for i in range(small_triple_size*2+1, small_triple_size * 3 + 1):
             reduces_col += 1
-            for j in range(len(self.br[i])-1-reduces_col, len(self.br[i])):
+            for j in range(len(self._cells[i])-1-reduces_col, len(self._cells[i])):
                 lst_se.append((i, j))
         if typ == 2:
             for i in range(small_triple_size+1):
@@ -141,7 +187,7 @@ class Board:
         dic['SE'] = lst_se
         lst_s = []
         for i in range(small_triple_size*3+1, small_triple_size * 4 + 1):
-            for j in range(len(self.br[i])):
+            for j in range(len(self._cells[i])):
                 lst_s.append((i, j))
         if typ == 2:
             for i in range(small_triple_size+1):
@@ -169,25 +215,11 @@ class Board:
         dic['NW'] = lst_nw
         return dic
 
-    def cell_contents(self, loc: Tuple[int, int]) -> str:
-        row = loc[0]
-        col = loc[1]
-        continn = self.br[row][col]
-        return continn
-
-    def add_balls_triple_size(self, ball: Ball, direction: str, typ: int) -> bool:
-        """"Gets a ball and direction of the target triangle and adds the
-         ball to that target triangle if it fails sends false If successful sends true """
-        location = ball.location
-        row = location[0]
-        col = location[1]
-        color = ball.color
-        dic = self.target_triangles(typ)
-        if (location in dic[direction]) and self.is_empty(location):
-            self.br[row][col] = color
-            return True
-        else:
+    def add_ball_to_triangle(self, ball: Ball, direction: str, triangle_type: int) -> bool:
+        """Place the actual piece only if it belongs to this starting triangle."""
+        if ball.location not in self.triangle_cells(triangle_type)[direction]:
             return False
+        return self.place_ball(ball)
 
     def _neighbors(self, point: Tuple[int, int]) -> Dict[str, Tuple[int, int]]:
         """Six adjacent coordinates in compass order across the star's row seams."""
@@ -221,10 +253,10 @@ class Board:
             'W': (row, col - 1),
         }
 
-    def simple_move(self, coordinate: Tuple[int, int]) -> Dict[str, List[Any]]:
+    def classify_neighbors(self, coordinate: Tuple[int, int]) -> Dict[str, List[Any]]:
         """Classify adjacent cells as empty, occupied, or outside the board."""
         result = {'allowed': [], 'banned': [], 'not_exist': []}
-        cells = set(self.cell_list())
+        cells = set(self.cell_coordinates())
         for neighbor in self._neighbors(coordinate).values():
             if neighbor not in cells:
                 result['not_exist'].append(neighbor)
@@ -234,12 +266,9 @@ class Board:
                 result['banned'].append(neighbor)
         return result
 
-
-    def forbidden_direction(self, dic: Dict[str, List[Tuple[int, int]]],
+    def direction_between(self, dic: Dict[str, List[Tuple[int, int]]],
                             current: Tuple[int, int], current_ban: Tuple[int, int]) -> str:
-        """"A program receives a current member and a forbidden
-         member and checks on which side the forbidden member is
-          in relation to the current member"""
+        """Find the compass direction of a classified neighboring cell."""
         row_current = current[0]
         row_current_ban = current_ban[0]
         col_current_ban = current_ban[1]
@@ -260,10 +289,9 @@ class Board:
                     word = word + 'W'
                     return word
 
-    def next_direction(self, cor: Tuple[int, int], direction: str) -> Tuple[int, int]:
+    def adjacent_coordinate(self, cor: Tuple[int, int], direction: str) -> Tuple[int, int]:
         """Return the adjacent coordinate in a compass direction."""
         return self._neighbors(cor)[direction]
-
 
     def jump_paths(self, source: Tuple[int, int]) -> Dict[Tuple[int, int], List[Tuple[int, int]]]:
         """Return a shortest sequence of landing cells for each reachable jump target.
@@ -271,7 +299,7 @@ class Board:
         The moving piece vacates its starting cell. Every later hop must still
         cross a piece that occupies the middle cell on the current board.
         """
-        cells = set(self.cell_list())
+        cells = set(self.cell_coordinates())
         if source not in cells:
             return {}
         paths = {source: [source]}
@@ -281,7 +309,7 @@ class Board:
             for direction, middle in self._neighbors(current).items():
                 if middle not in cells or middle == source or self.is_empty(middle):
                     continue
-                landing = self.next_direction(middle, direction)
+                landing = self.adjacent_coordinate(middle, direction)
                 if (landing in cells and landing not in paths
                         and self.is_empty(landing)):
                     paths[landing] = paths[current] + [landing]
@@ -291,205 +319,70 @@ class Board:
 
     def move_path(self, source: Tuple[int, int], target: Tuple[int, int]) -> List[Tuple[int, int]]:
         """Explain a legal step or jump chain as visited cells, or return []."""
-        if source not in self.cell_list():
+        if source not in self.cell_coordinates():
             return []
-        if target in self.simple_good_move(source):
+        if target in self.step_destinations(source):
             return [source, target]
         return self.jump_paths(source).get(target, [])
 
-    def jumps_possible_move(self, cordinata: Tuple[int, int]) -> List[Any]:
+    def jump_destinations(self, cordinata: Tuple[int, int]) -> List[Any]:
         """Return all destinations reached by one or more valid jumps."""
         # Preserve the original set-derived ordering for existing callers.
         return list(set(self.jump_paths(cordinata)))
 
-    def simple_good_move(self, cor: Tuple[int, int]) -> List[Any]:
-        """The program receives a coordinate and returns a list of all the coordinates
-         that can be reached simply by passing"""
-        return self.simple_move(cor)['allowed']
+    def step_destinations(self, cor: Tuple[int, int]) -> List[Any]:
+        """Return the empty cells reachable by one adjacent step."""
+        return self.classify_neighbors(cor)['allowed']
 
-
-    def simple_good_move_fat(self,corditata , direction, lst_simple_move):
-        save_ls_good = copy.deepcopy(lst_simple_move)
-        row = corditata[0]
-        col = corditata[1]
-        for cor in save_ls_good:
-            if direction == 'N':
-                if cor[0] < row:
-                    lst_simple_move.remove(cor)
-            if direction == 'S':
-                if cor[0] > row:
-                    lst_simple_move.remove(cor)
-            if direction == 'NW' or direction == 'SW' :
-                if cor[1] < col:
-                    lst_simple_move.remove(cor)
-            if direction == 'NE' or direction == 'SE' :
-                if cor[1] > col:
-                    lst_simple_move.remove(cor)
-        return lst_simple_move
-
-
-    def empty_target(self, direction: str, typ: int) -> List[Any]:
-        """Gets a direction and returns all empty targets in that direction"""
-        dic_targ = self.target_triangles(typ)
-        lst_targ = dic_targ[direction]
+    def empty_triangle_cells(self, direction: str, typ: int) -> List[Any]:
+        """Return empty cells inside a given corner triangle."""
+        goal_directions = self.triangle_cells(typ)
+        lst_targ = goal_directions[direction]
         empty_lst_targ = []
         for cor in lst_targ:
             if self.is_empty(cor):
                empty_lst_targ.append(cor)
         return empty_lst_targ
 
-    def empty_near_target(self, target: Tuple[int, int], path: list, drection: str, typ: int, ban: List[Tuple[int, int]]) -> List[Any]:
-        """Gets a destination and returns path all the free places closest to it"""
-        all_paths = []
+    def legal_destinations(self, cor: Tuple[int, int]) -> List[Any]:
+        """Return all destinations reachable by one step or a jump chain."""
 
-        def dfs(target, path, ban):
-            dic_drection = self.target_triangles(typ)
-            lst_drection = dic_drection[drection]
-            if self.is_empty(target) and target not in lst_drection and target not in ban:
-                path.append(target)
-                all_paths.append(copy.copy(path))
-                path.pop()
-                return
-            dic_simple_move = self.simple_move(target)
-            lst_simple_move = dic_simple_move['allowed'] + dic_simple_move['banned']
-            lst_simple_move = self.simple_good_move_fat(target, drection, lst_simple_move)
-            # print(lst_simple_move)
-            for loc in lst_simple_move:
-                if loc in path:
-                    continue
-                path.append(target)
-                dfs(loc, path, ban)
-                path.pop()
-
-        dfs(target, path, ban)
-        return all_paths
-
-    def all_options_move(self, cor: Tuple[int, int]) -> List[Any]:
-        """The program receives a coordinate and returns
-        a list of all possible coordinates by a valid displacement
-        A legal move: it is a move by me only one step to one of the
-        sides or by me skipping over one soldier, several skips are possible"""
-
-        all_options = self.simple_good_move(cor)+self.jumps_possible_move(cor)
+        all_options = self.step_destinations(cor)+self.jump_destinations(cor)
         all_options = set(all_options)
         all_options = list(all_options)
         return all_options
 
-    def _can_arrive_target(
-            self,
-            empty_target: Tuple[int, int],
-            loc: Tuple[int, int],
-            save_lst: list[Any]
-    ) -> bool:
-        """Return True if a path exists from loc to empty_target."""
-        return bool(self.best_path(empty_target, loc, []))
+    def move_ball(self, source: Coordinate, target: Coordinate) -> bool:
+        """Relocate the same Ball and update its position in one operation.
 
-    def can_arrive_target(self, lst_empty_target: list, lst_loc: list) -> List[Any]:
-        """Gets a list of destinations and a list of locations
-         and returns a list of all destinations that can be reached"""
-        new_lst_empty_target = []
-        for empty_target in lst_empty_target:
-            for loc in lst_loc:
-                if self._can_arrive_target(empty_target, loc, []):
-                    new_lst_empty_target.append(empty_target)
-                    break
-        return new_lst_empty_target
-
-    def best_path(
-            self,
-            target: Tuple[int, int],
-            loc: Tuple[int, int],
-            path: list
-    ) -> List[Any]:
-        """Return a shortest path from loc to target using BFS."""
-
-        cells = set(self.cell_list())
-
-        if loc not in cells or target not in cells:
-            return []
-
-        # If there is a real piece at loc, keep its color.
-        # When best_path is used only as an abstract path search,
-        # use a temporary non-empty marker.
-        piece = self.cell_contents(loc)
-        if piece == 'O':
-            piece = 'X'
-
-        queue = deque([(loc, [loc])])
-        visited = {loc}
-
-        while queue:
-            current_loc, current_path = queue.popleft()
-
-            if current_loc == target:
-                return current_path
-
-            # Simulate the moving piece at its current BFS position.
-            simulated_board = copy.deepcopy(self)
-
-            simulated_board.br[loc[0]][loc[1]] = 'O'
-            simulated_board.br[current_loc[0]][current_loc[1]] = piece
-
-            for next_loc in simulated_board.all_options_move(current_loc):
-                if next_loc not in visited:
-                    visited.add(next_loc)
-                    queue.append(
-                        (next_loc, current_path + [next_loc])
-                    )
-
-        return []
-
-    def all_best_paths(
-            self,
-            lst_empty_target: List[Tuple[int, int]],
-            lst_loc: List[Tuple[int, int]]
-    ) -> List[Any]:
-        """Return all shortest paths between the given locations and targets."""
-
-        paths = []
-
-        for target in lst_empty_target:
-            for loc in lst_loc:
-                current_path = self.best_path(target, loc, [])
-
-                if current_path:
-                    paths.append(current_path)
-
-        if not paths:
-            return []
-
-        return util.find_smallest_lists(paths)
-
-    def replace(self, loc: Tuple[int, int], target: Tuple[int, int]) -> bool:
-        """The program receives a location and destination and replaces them
-        and returns false if it fails"""
-
-        if self.is_empty(loc) or not self.is_empty(target):
+        Game checks ownership and move legality before calling this method.
+        """
+        if self.is_empty(source) or not self.is_empty(target):
             return False
-        else:
-            row_loc = loc[0]
-            col_loc = loc[1]
-            row_target = target[0]
-            col_target = target[1]
-            self.br[row_target][col_target] = self.br[row_loc][col_loc]
-            self.br[row_loc][col_loc] = 'O'
-            return True
+        ball = self.get_ball(source)
+        source_row, source_column = source
+        target_row, target_column = target
+        self._cells[target_row][target_column] = ball
+        self._cells[source_row][source_column] = None
+        ball.move_to(target)
+        return True
 
-    def me_target_taken(self, direction: str, typ: int, color: str) -> List[Any]:
-        """Returns the occupied places in the destination"""
-        dic_targ = self.target_triangles(typ)
-        lst_targ = dic_targ[direction]
+    def opponent_triangle_cells(self, direction: str, typ: int, color: str) -> List[Any]:
+        """Return triangle cells occupied by a different color."""
+        goal_directions = self.triangle_cells(typ)
+        lst_targ = goal_directions[direction]
         taken_lst_targ = []
         for cor in lst_targ:
-            if not self.is_empty(cor) and self.cell_contents(cor) != color:
+            if not self.is_empty(cor) and self.color_at(cor) != color:
                 taken_lst_targ.append(cor)
         return taken_lst_targ
 
-    def all_empty(self) -> List[Any]:
-        """Returns all empty spaces in the board"""
+    def empty_cells(self) -> List[Any]:
+        """Return every empty coordinate on the current board."""
         lst = []
-        all_cell = self.cell_list()
+        all_cell = self.cell_coordinates()
         for cor in all_cell:
             if self.is_empty(cor):
                 lst.append(cor)
         return lst
+

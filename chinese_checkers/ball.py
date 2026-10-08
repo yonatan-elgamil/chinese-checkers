@@ -13,27 +13,26 @@ class Ball:
     def __str__(self) -> str:
         return f"{self.color} ball at {self.location}"
 
-    def get_location(self) -> tuple:
-        """A program that returns the location of the ball"""
+    def get_position(self) -> tuple:
+        """Return the current board coordinate."""
         return self.location
 
     def get_color(self) -> str:
-        """A program that returns the color of the ball"""
+        """Return the piece color."""
         return self.color
 
-    def is_possible_replaces(self, targer: Tuple[int, int]) -> bool:
-        """"A program that checks if the replacement of the location
-         is possible and returns true and false accordingly"""
-        row = targer[0]
-        col = targer[1]
+    def can_move_to(self, target: Tuple[int, int]) -> bool:
+        """Check nonnegative coordinates; Board owns movement legality."""
+        row = target[0]
+        col = target[1]
         if row < 0 or col < 0:
             return False
         return True
 
-    def replaces(self, targer: Tuple[int, int]) -> bool:
-        """A program that replaces a bullet if it fails sends a false"""
-        if self.is_possible_replaces(targer):
-            self.location = targer
+    def move_to(self, target: Tuple[int, int]) -> bool:
+        """Update the position if both coordinates are nonnegative."""
+        if self.can_move_to(target):
+            self.location = target
             return True
         else:
             return False

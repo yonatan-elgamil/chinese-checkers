@@ -1,7 +1,6 @@
 """Pygame board, input controller, and match/menu navigation."""
 
 import argparse
-from dataclasses import dataclass
 import logging
 import math
 from pathlib import Path
@@ -31,16 +30,32 @@ def create_visual_game(store: GameStorage, versus_computer: bool = False) -> Gam
                       ["Red"] if versus_computer else ["Red", "Blue"], store)
 
 
-@dataclass(frozen=True)
 class BoardLayout:
     """Map jagged board coordinates to screen pixels and mouse clicks."""
 
-    points: Dict[Coordinate, Point]
-    radius: int
+    def __init__(self, points, radius):
+        self._points = points
+        self._radius = radius
+
+    @property
+    def points(self):
+        return self._points
+
+    @property
+    def radius(self):
+        return self._radius
+
+    def __eq__(self, other):
+        if type(self) is not type(other):
+            return NotImplemented
+        return self.points == other.points and self.radius == other.radius
+
+    def __hash__(self):
+        return hash((self.points, self.radius))
 
     @classmethod
     def from_board(cls, board: Board, width: int, height: int) -> "BoardLayout":
-        rows = board.get_br()
+        rows = board.get_cells()
         spacing = min(92, (width - 342) / max(len(row) - 1 for row in rows),
                       (height - 210) / ((len(rows) - 1) * math.sqrt(3) / 2))
         center_x = (width - 250) / 2
@@ -102,11 +117,11 @@ class VisualController:
             if was_jump and self.session.status == "playing":
                 self.message = f"Completed {len(path) - 1} jump(s) along the gold route."
             return
-        if cell in self.session.game.loc_player(player):
+        if cell in self.session.game.positions_for_player(player):
             board = self.session.game.board
             self.selected = cell
             self.paths = {target: [cell, target]
-                          for target in board.simple_good_move(cell)}
+                          for target in board.step_destinations(cell)}
             jump_paths = board.jump_paths(cell)
             self.paths.update(jump_paths)
             self.jump_targets = set(jump_paths)
@@ -143,7 +158,7 @@ class VisualController:
         player = self.session.current_player
         if player is None or player.get_name() != "computer":
             return
-        move = self.session.game.computer.choose_move(player)
+        move = self.session.game.computer_strategy.choose_move(player)
         path = self.session.game.board.move_path(*move) if move else []
         self.session.submit_move(move)
         self.last_path = path
@@ -265,7 +280,7 @@ class PygameView:
                      border_radius=24)
         for cell, origin in self.layout.points.items():
             for direction in ("E", "SE", "SW"):
-                neighbor = board.next_direction(cell, direction)
+                neighbor = board.adjacent_coordinate(cell, direction)
                 if neighbor in self.layout.points:
                     pg.draw.line(self.screen, (42, 67, 82), origin,
                                  self.layout.points[neighbor], 3)
@@ -290,7 +305,7 @@ class PygameView:
         self._draw_route_lines(path)
         for cell, origin in self.layout.points.items():
             radius = self.layout.radius
-            color = board.cell_contents(cell)
+            color = board.color_at(cell)
             if color != "O":
                 piece_color = PIECE_COLORS[color]
                 pg.draw.circle(self.screen, (8, 20, 32),
@@ -333,21 +348,21 @@ class PygameView:
         x = left + 24
         self._text("MATCH", (x, 132), self.heading_font)
         mode = "  |  Teams" if game.is_group else ""
-        sets = len(game.players[0].get_color())
+        sets = len(game.players[0].get_colors())
         self._text(f"Size {game.board.size}  |  {len(game.players)} players" + mode,
                    (x, 170), self.small_font,
                    (153, 183, 201))
         if sets > 1:
             self._text(f"{sets} colors per player", (x, 190), self.small_font,
                        (153, 183, 201))
-        groups = game.group() if game.is_group else []
+        groups = game.team_color_pairs() if game.is_group else []
         computer_number = 0
         for index, player in enumerate(game.players):
             y = 216 + index * 42
             if session.current_player is player:
                 pg.draw.rect(self.screen, (33, 65, 78), (x - 8, y - 5, 200, 37),
                              border_radius=7)
-            for number, color in enumerate(player.get_color()):
+            for number, color in enumerate(player.get_colors()):
                 pg.draw.circle(self.screen, PIECE_COLORS[color],
                                (x + 11 + number * 16, y + 10), 7)
             name = player.get_name()
@@ -358,7 +373,7 @@ class PygameView:
             self._text(name[:12], (name_x, y), self.small_font)
             if groups:
                 team = next(i + 1 for i, colors in enumerate(groups)
-                            if player.get_color()[0] in colors)
+                            if player.get_colors()[0] in colors)
                 self._text(f"T{team}", (x + 169, y), self.small_font,
                            (153, 183, 201))
             if session.current_player is player:
@@ -393,7 +408,7 @@ class PygameView:
 class GraphicalApp:
     """Switch between setup and match views and route window events."""
 
-    def __init__(self, pygame, screen, store, computer=False):
+    def __init__(self, pygame, screen, store, computer_strategy=False):
         self.pg = pygame
         self.screen = screen
         self.store = store
@@ -402,7 +417,7 @@ class GraphicalApp:
             self._open_game(restore_game(saved, store=store))
         else:
             self.view = PygameSetupView(pygame, screen, store,
-                                        SetupSelection(computer_count=int(computer)))
+                                        SetupSelection(computer_count=int(computer_strategy)))
 
     def _open_game(self, game):
         self.view = PygameView(self.pg, self.screen,
@@ -504,7 +519,6 @@ def run(argv=None):
                 clock.tick(30)
     finally:
         pygame.quit()
-
 
 if __name__ == "__main__":
     run()

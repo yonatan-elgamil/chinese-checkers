@@ -8,39 +8,36 @@ from chinese_checkers.session import GameSession
 from chinese_checkers.setup import SetupOptions, build_game, restore_game
 from chinese_checkers.storage import GameStorage
 
-
 def test_click_move_and_resume_uses_same_rules(tmp_path):
     store = GameStorage(tmp_path / "visual_game_data.json")
     game = create_visual_game(store)
     controller = VisualController(GameSession(game))
     source = (1, 1)
     controller.click_cell(source)
-    assert controller.targets == set(game.board.all_options_move(source))
+    assert controller.targets == set(game.board.legal_destinations(source))
     destination = next(iter(controller.targets))
     controller.click_cell(destination)
 
-    assert game.board.cell_contents(source) == "O"
-    assert game.board.cell_contents(destination) == "R"
-    assert destination in game.loc_color("R")
+    assert game.board.color_at(source) == "O"
+    assert game.board.color_at(destination) == "R"
+    assert destination in game.positions_for_color("R")
     assert controller.session.current_player.get_name() == "Blue"
     saved = store.load()
     restored = GameSession(restore_game(saved, store=store))
     assert restored.current_player.get_name() == "Blue"
-    assert restored.game.board.get_br() == game.board.get_br()
-
+    assert restored.game.board.get_color_grid() == game.board.get_color_grid()
 
 def test_visual_pass_and_computer_use_shared_turn_order(tmp_path):
     store = GameStorage(tmp_path / "visual_game_data.json")
     controller = VisualController(GameSession(create_visual_game(store, True)))
-    before = set(controller.session.game.loc_color("B"))
+    before = set(controller.session.game.positions_for_color("B"))
     controller.pass_turn()
     assert controller.session.current_player.get_name() == "computer"
     controller.play_computer_turn()
     assert controller.session.current_player.get_name() == "Red"
-    after = set(controller.session.game.loc_color("B"))
+    after = set(controller.session.game.positions_for_color("B"))
     assert before != after
-    assert all(controller.session.game.board.cell_contents(cell) == "B" for cell in after)
-
+    assert all(controller.session.game.board.color_at(cell) == "B" for cell in after)
 
 def test_immobile_players_reach_draw_without_input_or_infinite_loop(tmp_path, monkeypatch):
     monkeypatch.setattr("builtins.input", lambda _: (_ for _ in ()).throw(
@@ -54,14 +51,12 @@ def test_immobile_players_reach_draw_without_input_or_infinite_loop(tmp_path, mo
     assert [event.kind for event in session.drain_events()].count("blocked") == 6
     assert not store.exists()
 
-
 def test_every_hole_maps_to_its_screen_position(tmp_path):
     board = create_visual_game(GameStorage(tmp_path / "save.json")).board
     layout = BoardLayout.from_board(board, *WINDOW_SIZE)
-    assert set(layout.points) == set(board.cell_list())
+    assert set(layout.points) == set(board.cell_coordinates())
     assert all(layout.cell_at(point) == cell for cell, point in layout.points.items())
     assert layout.cell_at((0, 0)) is None
-
 
 def _game_from_reported_position(tmp_path):
     """The exact occupied cells visible in the user's screenshot."""
@@ -72,13 +67,12 @@ def _game_from_reported_position(tmp_path):
     }
     balls = {"R": [], "B": []}
     for position, color in occupied.items():
-        board.br[position[0]][position[1]] = color
+        board.place_ball(Ball(color, position))
         balls[color].append(Ball(color, position))
     return Game(board, balls,
                 [Player("Red", 0, 0, ["R"]), Player("Blue", 0, 0, ["B"])],
                 0, color_directions={"R": "N", "B": "S"},
                 store=GameStorage(tmp_path / "save.json"))
-
 
 def test_reported_destination_uses_two_real_jumps(tmp_path):
     game = _game_from_reported_position(tmp_path)
@@ -94,18 +88,16 @@ def test_reported_destination_uses_two_real_jumps(tmp_path):
     assert "2 jump" in controller.message
     controller.click_cell(target)
     assert controller.last_path == path
-    assert game.board.cell_contents(source) == "O"
-    assert game.board.cell_contents(target) == "R"
-
+    assert game.board.color_at(source) == "O"
+    assert game.board.color_at(target) == "R"
 
 def test_target_disappears_after_piece_in_jump_path_moves_away(tmp_path):
     game = _game_from_reported_position(tmp_path)
-    assert (2, 2) in game.board.all_options_move((2, 0))
+    assert (2, 2) in game.board.legal_destinations((2, 0))
     game.apply_move(game.players[0], (1, 2), (1, 3))
-    assert game.board.cell_contents((1, 2)) == "O"
-    assert (2, 2) not in game.board.all_options_move((2, 0))
+    assert game.board.color_at((1, 2)) == "O"
+    assert (2, 2) not in game.board.legal_destinations((2, 0))
     assert game.board.move_path((2, 0), (2, 2)) == []
-
 
 def test_pygame_view_can_draw_in_headless_mode(tmp_path, monkeypatch):
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
@@ -128,7 +120,6 @@ def test_pygame_view_can_draw_in_headless_mode(tmp_path, monkeypatch):
     finally:
         pygame.quit()
 
-
 def test_menu_keeps_all_settings_valid_and_builds_the_same_game(tmp_path):
     store = GameStorage(tmp_path / "save.json")
     selection = SetupSelection()
@@ -141,7 +132,7 @@ def test_menu_keeps_all_settings_valid_and_builds_the_same_game(tmp_path):
     game = selection.build(store)
     assert [p.get_name() for p in game.players] == ["Ada", "Bea", "Cid", "Dot",
                                                      "computer", "computer"]
-    assert len(game.group()) == 3
+    assert len(game.team_color_pairs()) == 3
     restored_settings = SetupSelection.from_game(game)
     assert restored_settings.options == selection.options
     assert restored_settings.names[:4] == selection.names[:4]
@@ -151,7 +142,6 @@ def test_menu_keeps_all_settings_valid_and_builds_the_same_game(tmp_path):
     assert selection.teams == 0
     selection.adjust("sets", 2)
     assert selection.options.sets_per_player == 3
-
 
 def test_graphical_settings_and_six_player_match_render_and_resume(tmp_path, monkeypatch):
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
@@ -177,7 +167,7 @@ def test_graphical_settings_and_six_player_match_render_and_resume(tmp_path, mon
         view = PygameView(pygame, screen, controller, store)
         view.draw()
         assert screen.get_at((0, 0))[:3] == (10, 25, 38)
-        assert set(view.layout.points) == set(game.board.cell_list())
+        assert set(view.layout.points) == set(game.board.cell_coordinates())
         assert all(view.layout.cell_at(point) == cell
                    for cell, point in view.layout.points.items())
         controller.pass_turn()
@@ -187,9 +177,9 @@ def test_graphical_settings_and_six_player_match_render_and_resume(tmp_path, mon
         menu = PygameSetupView(pygame, screen, store, SetupSelection.from_game(game))
         assert menu.resume_available
         resumed = menu.resume_game()
-        assert resumed.board.get_br() == game.board.get_br()
+        assert resumed.board.get_color_grid() == game.board.get_color_grid()
         assert resumed.is_group == 1
-        assert resumed.dic_color_loc == game.dic_color_loc
+        assert resumed.starting_directions == game.starting_directions
         bigger = pygame.display.set_mode((1200, 850))
         view.resize(bigger)
         view.draw()
@@ -197,7 +187,6 @@ def test_graphical_settings_and_six_player_match_render_and_resume(tmp_path, mon
                    for cell, point in view.layout.points.items())
     finally:
         pygame.quit()
-
 
 def test_invalid_setup_does_not_delete_save(tmp_path, monkeypatch):
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
@@ -218,7 +207,6 @@ def test_invalid_setup_does_not_delete_save(tmp_path, monkeypatch):
     finally:
         pygame.quit()
 
-
 def test_gui_draws_each_terminal_match_type(tmp_path, monkeypatch):
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
     monkeypatch.setenv("SDL_AUDIODRIVER", "dummy")
@@ -238,11 +226,10 @@ def test_gui_draws_each_terminal_match_type(tmp_path, monkeypatch):
             game = menu.start_game()
             view = PygameView(pygame, screen, VisualController(GameSession(game)), store)
             view.draw()
-            assert len(view.layout.points) == len(game.board.cell_list())
+            assert len(view.layout.points) == len(game.board.cell_coordinates())
             assert view.layout.cell_at(view.layout.points[(0, 0)]) == (0, 0)
     finally:
         pygame.quit()
-
 
 def test_gui_event_loop_starts_moves_and_resumes(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
@@ -254,7 +241,7 @@ def test_gui_event_loop_starts_moves_and_resumes(tmp_path, monkeypatch):
 
     starting = create_visual_game(GameStorage(tmp_path / "other.json"))
     source = (1, 1)
-    target = next(iter(starting.board.all_options_move(source)))
+    target = next(iter(starting.board.legal_destinations(source)))
     layout = BoardLayout.from_board(starting.board, *WINDOW_SIZE)
     steps = [
         [pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1, pos=(798, 665))],
@@ -271,7 +258,6 @@ def test_gui_event_loop_starts_moves_and_resumes(tmp_path, monkeypatch):
     assert saved is not None
     assert saved["board"]["br"][source[0]][source[1]] == "O"
     assert saved["board"]["br"][target[0]][target[1]] == "R"
-
 
 def test_graphical_history_shows_moves_and_keeps_the_turn(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)

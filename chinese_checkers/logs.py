@@ -14,10 +14,10 @@ def load_log_file(filename: Any) -> Any:
             match = re.match(r'INFO:root:(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})'
                              r' - Player\s+(\w+)\s+in\s+color\s+(\w+):\s+(.+)', line)
             if match:
-                timestamp = match.group(1)
-                player_name = match.group(2)
-                color = match.group(3)
-                move = match.group(4)
+                timestamp = match.team_color_pairs(1)
+                player_name = match.team_color_pairs(2)
+                color = match.team_color_pairs(3)
+                move = match.team_color_pairs(4)
                 moves.append((timestamp, player_name, color, move))
             else:
                 moves.append((line.strip(), '', '', ''))
